@@ -1,14 +1,16 @@
-import { DebouncedFunc } from 'lodash';
+import type { DebouncedFunc } from 'lodash';
 import filter from 'lodash/filter';
 import first from 'lodash/first';
 import sortBy from 'lodash/sortBy';
 import findKey from 'lodash/findKey';
-import forEach from 'lodash/forEach';
 import forOwn from 'lodash/forOwn';
 import throttle from 'lodash/throttle';
 import debounce from 'lodash/debounce';
 import difference from 'lodash/difference';
-import measureLayout, { getBoundingClientRect } from './measureLayout';
+import measureLayout, {
+  getBoundingClientRect,
+  type MeasureLayout
+} from './measureLayout';
 import VisualDebugger from './VisualDebugger';
 
 const DIRECTION_LEFT = 'left';
@@ -51,13 +53,7 @@ const THROTTLE_OPTIONS = {
   trailing: false
 };
 
-export interface FocusableComponentLayout {
-  left: number;
-  top: number;
-  width: number;
-  height: number;
-  x: number;
-  y: number;
+export interface FocusableComponentLayout extends MeasureLayout {
   node: HTMLElement;
 }
 
@@ -663,7 +659,7 @@ class SpatialNavigationService {
   bindEventHandlers() {
     // We check both because the React Native remote debugger implements window, but not window.addEventListener.
     if (typeof window !== 'undefined' && window.addEventListener) {
-      this.keyDownEventListener = (event: KeyboardEvent) => {
+      this.keyDownEventListener = async (event: KeyboardEvent) => {
         if (this.paused === true) {
           return;
         }
@@ -705,7 +701,7 @@ class SpatialNavigationService {
             this.visualDebugger.clear();
           }
         } else {
-          this.onKeyEvent(event);
+          await this.onKeyEvent(event);
         }
       };
 
@@ -828,7 +824,7 @@ class SpatialNavigationService {
    * @example
    * navigateByDirection('right') // The focus is moved to right
    */
-  navigateByDirection(direction: string, focusDetails: FocusDetails) {
+  async navigateByDirection(direction: string, focusDetails: FocusDetails) {
     if (this.paused === true || !this.enabled || this.nativeMode) {
       return;
     }
@@ -842,7 +838,7 @@ class SpatialNavigationService {
 
     if (validDirections.includes(direction)) {
       this.log('navigateByDirection', 'direction', direction);
-      this.smartNavigate(direction, null, focusDetails);
+      await this.smartNavigate(direction, null, focusDetails);
     } else {
       this.log(
         'navigateByDirection',
@@ -852,7 +848,7 @@ class SpatialNavigationService {
     }
   }
 
-  onKeyEvent(event: KeyboardEvent) {
+  async onKeyEvent(event: KeyboardEvent) {
     if (this.visualDebugger) {
       this.visualDebugger.clear();
     }
@@ -861,14 +857,14 @@ class SpatialNavigationService {
       codeList.includes(event.keyCode)
     );
 
-    this.smartNavigate(direction, null, { event });
+    await this.smartNavigate(direction, null, { event });
   }
 
   /**
    * This function navigates between siblings OR goes up by the Tree
    * Based on the Direction
    */
-  smartNavigate(
+  async smartNavigate(
     direction: string,
     fromParentFocusKey: string,
     focusDetails: FocusDetails
@@ -901,7 +897,7 @@ class SpatialNavigationService {
      * the Focusable Containers, that have "forceFocus" flag enabled.
      */
     if (!fromParentFocusKey && !currentComponent) {
-      this.setFocus(this.getForcedFocusKey());
+      await this.setFocus(this.getForcedFocusKey());
       return;
     }
 
@@ -914,7 +910,7 @@ class SpatialNavigationService {
     );
 
     if (currentComponent) {
-      this.updateLayout(currentComponent.focusKey);
+      await this.updateLayout(currentComponent.focusKey);
       const { parentFocusKey, focusKey, layout } = currentComponent;
 
       const currentCutoffCoordinate =
@@ -928,27 +924,31 @@ class SpatialNavigationService {
       /**
        * Get only the siblings with the coords on the way of our moving direction
        */
-      const siblings = filter(this.focusableComponents, (component) => {
-        if (
-          component.parentFocusKey === parentFocusKey &&
-          component.focusable
-        ) {
-          this.updateLayout(component.focusKey);
-          const siblingCutoffCoordinate =
-            SpatialNavigationService.getCutoffCoordinate(
-              isVerticalDirection,
-              isIncrementalDirection,
-              true,
-              component.layout
-            );
+      const components = Object.values(this.focusableComponents);
+      const mayBeSiblings = await Promise.all(
+        components.map(async (component) => {
+          if (
+            component.parentFocusKey === parentFocusKey &&
+            component.focusable
+          ) {
+            await this.updateLayout(component.focusKey);
+            const siblingCutoffCoordinate =
+              SpatialNavigationService.getCutoffCoordinate(
+                isVerticalDirection,
+                isIncrementalDirection,
+                true,
+                component.layout
+              );
 
-          return isIncrementalDirection
-            ? siblingCutoffCoordinate >= currentCutoffCoordinate
-            : siblingCutoffCoordinate <= currentCutoffCoordinate;
-        }
+            return isIncrementalDirection
+              ? siblingCutoffCoordinate >= currentCutoffCoordinate
+              : siblingCutoffCoordinate <= currentCutoffCoordinate;
+          }
 
-        return false;
-      });
+          return false;
+        })
+      );
+      const siblings = components.filter((_, index) => mayBeSiblings[index]);
 
       if (this.debug) {
         this.log(
@@ -995,7 +995,7 @@ class SpatialNavigationService {
       );
 
       if (nextComponent) {
-        this.setFocus(nextComponent.focusKey, focusDetails);
+        await this.setFocus(nextComponent.focusKey, focusDetails);
       } else {
         const parentComponent = this.focusableComponents[parentFocusKey];
 
@@ -1004,7 +1004,7 @@ class SpatialNavigationService {
           : [];
 
         if (!parentComponent || !focusBoundaryDirections.includes(direction)) {
-          this.smartNavigate(direction, parentFocusKey, focusDetails);
+          await this.smartNavigate(direction, parentFocusKey, focusDetails);
         }
       }
     }
@@ -1073,7 +1073,7 @@ class SpatialNavigationService {
    * It's either the target node OR the one down by the Tree if node has children components
    * Based on "targetFocusKey" which means the "intended component to focus"
    */
-  getNextFocusKey(targetFocusKey: string): string {
+  async getNextFocusKey(targetFocusKey: string): Promise<string> {
     const targetComponent = this.focusableComponents[targetFocusKey];
 
     /**
@@ -1139,7 +1139,9 @@ class SpatialNavigationService {
       /**
        * Otherwise, trying to focus something by coordinates
        */
-      children.forEach((component) => this.updateLayout(component.focusKey));
+      await Promise.all(
+        children.map(async (component) => this.updateLayout(component.focusKey))
+      );
       const { focusKey: childKey } = getChildClosestToOrigin(children);
 
       this.log('getNextFocusKey', 'childKey will be focused', childKey);
@@ -1155,7 +1157,7 @@ class SpatialNavigationService {
     return targetFocusKey;
   }
 
-  addFocusable({
+  async addFocusable({
     focusKey,
     node,
     parentFocusKey,
@@ -1215,7 +1217,7 @@ class SpatialNavigationService {
       return;
     }
 
-    this.updateLayout(focusKey);
+    await this.updateLayout(focusKey);
 
     this.log(
       'addFocusable',
@@ -1227,7 +1229,7 @@ class SpatialNavigationService {
      * If for some reason this component was already focused before it was added, call the update
      */
     if (focusKey === this.focusKey) {
-      this.setFocus(focusKey);
+      await this.setFocus(focusKey);
     }
 
     /**
@@ -1237,7 +1239,8 @@ class SpatialNavigationService {
     let currentComponent = this.focusableComponents[this.focusKey];
     while (currentComponent) {
       if (currentComponent.parentFocusKey === focusKey) {
-        this.updateParentsHasFocusedChild(this.focusKey, {});
+        // eslint-disable-next-line no-await-in-loop
+        await this.updateParentsHasFocusedChild(this.focusKey, {});
         this.updateParentsLastFocusedChild(this.focusKey);
         break;
       }
@@ -1304,11 +1307,11 @@ class SpatialNavigationService {
     }
   }
 
-  getNodeLayoutByFocusKey(focusKey: string) {
+  async getNodeLayoutByFocusKey(focusKey: string) {
     const component = this.focusableComponents[focusKey];
 
     if (component) {
-      this.updateLayout(component.focusKey);
+      await this.updateLayout(component.focusKey);
 
       return component.layout;
     }
@@ -1316,7 +1319,7 @@ class SpatialNavigationService {
     return null;
   }
 
-  setCurrentFocusedKey(newFocusKey: string, focusDetails: FocusDetails) {
+  async setCurrentFocusedKey(newFocusKey: string, focusDetails: FocusDetails) {
     if (
       this.isFocusableComponent(this.focusKey) &&
       newFocusKey !== this.focusKey
@@ -1324,7 +1327,7 @@ class SpatialNavigationService {
       const oldComponent = this.focusableComponents[this.focusKey];
       oldComponent.onUpdateFocus(false);
       oldComponent.onBlur(
-        this.getNodeLayoutByFocusKey(this.focusKey),
+        await this.getNodeLayoutByFocusKey(this.focusKey),
         focusDetails
       );
 
@@ -1342,7 +1345,7 @@ class SpatialNavigationService {
 
       newComponent.onUpdateFocus(true);
       newComponent.onFocus(
-        this.getNodeLayoutByFocusKey(this.focusKey),
+        await this.getNodeLayoutByFocusKey(this.focusKey),
         focusDetails
       );
 
@@ -1350,7 +1353,10 @@ class SpatialNavigationService {
     }
   }
 
-  updateParentsHasFocusedChild(focusKey: string, focusDetails: FocusDetails) {
+  async updateParentsHasFocusedChild(
+    focusKey: string,
+    focusDetails: FocusDetails
+  ) {
     const parents = [];
 
     let currentComponent = this.focusableComponents[focusKey];
@@ -1381,23 +1387,33 @@ class SpatialNavigationService {
       this.parentsHavingFocusedChild
     );
 
-    forEach(parentsToRemoveFlag, (parentFocusKey) => {
-      const parentComponent = this.focusableComponents[parentFocusKey];
+    await Promise.all(
+      parentsToRemoveFlag.map(async (parentFocusKey) => {
+        const parentComponent = this.focusableComponents[parentFocusKey];
 
-      if (parentComponent && parentComponent.trackChildren) {
-        parentComponent.onUpdateHasFocusedChild(false);
-      }
-      this.onIntermediateNodeBecameBlurred(parentFocusKey, focusDetails);
-    });
+        if (parentComponent && parentComponent.trackChildren) {
+          parentComponent.onUpdateHasFocusedChild(false);
+        }
+        await this.onIntermediateNodeBecameBlurred(
+          parentFocusKey,
+          focusDetails
+        );
+      })
+    );
 
-    forEach(parentsToAddFlag, (parentFocusKey) => {
-      const parentComponent = this.focusableComponents[parentFocusKey];
+    await Promise.all(
+      parentsToAddFlag.map(async (parentFocusKey) => {
+        const parentComponent = this.focusableComponents[parentFocusKey];
 
-      if (parentComponent && parentComponent.trackChildren) {
-        parentComponent.onUpdateHasFocusedChild(true);
-      }
-      this.onIntermediateNodeBecameFocused(parentFocusKey, focusDetails);
-    });
+        if (parentComponent && parentComponent.trackChildren) {
+          parentComponent.onUpdateHasFocusedChild(true);
+        }
+        await this.onIntermediateNodeBecameFocused(
+          parentFocusKey,
+          focusDetails
+        );
+      })
+    );
 
     this.parentsHavingFocusedChild = parents;
   }
@@ -1450,25 +1466,25 @@ class SpatialNavigationService {
     );
   }
 
-  onIntermediateNodeBecameFocused(
+  async onIntermediateNodeBecameFocused(
     focusKey: string,
     focusDetails: FocusDetails
   ) {
     if (this.isParticipatingFocusableComponent(focusKey)) {
       this.focusableComponents[focusKey].onFocus(
-        this.getNodeLayoutByFocusKey(focusKey),
+        await this.getNodeLayoutByFocusKey(focusKey),
         focusDetails
       );
     }
   }
 
-  onIntermediateNodeBecameBlurred(
+  async onIntermediateNodeBecameBlurred(
     focusKey: string,
     focusDetails: FocusDetails
   ) {
     if (this.isParticipatingFocusableComponent(focusKey)) {
       this.focusableComponents[focusKey].onBlur(
-        this.getNodeLayoutByFocusKey(focusKey),
+        await this.getNodeLayoutByFocusKey(focusKey),
         focusDetails
       );
     }
@@ -1482,7 +1498,7 @@ class SpatialNavigationService {
     this.paused = false;
   }
 
-  setFocus(focusKey: string, focusDetails: FocusDetails = {}) {
+  async setFocus(focusKey: string, focusDetails: FocusDetails = {}) {
     // Cancel any pending auto-restore focus calls if we are setting focus manually
     this.setFocusDebounced.cancel();
 
@@ -1502,26 +1518,28 @@ class SpatialNavigationService {
       focusKey = this.getForcedFocusKey();
     }
 
-    const newFocusKey = this.getNextFocusKey(focusKey);
+    const newFocusKey = await this.getNextFocusKey(focusKey);
 
     this.log('setFocus', 'newFocusKey', newFocusKey);
 
-    this.setCurrentFocusedKey(newFocusKey, focusDetails);
-    this.updateParentsHasFocusedChild(newFocusKey, focusDetails);
+    await this.setCurrentFocusedKey(newFocusKey, focusDetails);
+    await this.updateParentsHasFocusedChild(newFocusKey, focusDetails);
     this.updateParentsLastFocusedChild(newFocusKey);
   }
 
-  updateAllLayouts() {
+  async updateAllLayouts() {
     if (!this.enabled || this.nativeMode) {
       return;
     }
 
-    forOwn(this.focusableComponents, (component, focusKey) => {
-      this.updateLayout(focusKey);
-    });
+    await Promise.all(
+      Object.keys(this.focusableComponents).map((focusKey) =>
+        this.updateLayout(focusKey)
+      )
+    );
   }
 
-  updateLayout(focusKey: string) {
+  async updateLayout(focusKey: string) {
     const component = this.focusableComponents[focusKey];
 
     if (!component || this.nativeMode || component.layoutUpdated) {
@@ -1531,8 +1549,8 @@ class SpatialNavigationService {
     const { node } = component;
 
     const layout = this.useGetBoundingClientRect
-      ? getBoundingClientRect(node)
-      : measureLayout(node);
+      ? await getBoundingClientRect(node)
+      : await measureLayout(node);
 
     component.layout = {
       ...layout,

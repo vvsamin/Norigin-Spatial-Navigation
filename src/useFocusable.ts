@@ -1,19 +1,19 @@
 import {
-  RefObject,
   useCallback,
   useMemo,
   useRef,
   useEffect,
-  useState
+  useState,
+  type RefObject
 } from 'react';
 import noop from 'lodash/noop';
 import uniqueId from 'lodash/uniqueId';
 import {
   SpatialNavigation,
-  FocusableComponentLayout,
-  FocusDetails,
-  KeyPressDetails,
-  Direction
+  type FocusableComponentLayout,
+  type FocusDetails,
+  type KeyPressDetails,
+  type Direction
 } from './SpatialNavigation';
 import { useFocusContext } from './useFocusContext';
 
@@ -132,41 +132,47 @@ const useFocusableHook = <P>({
   );
 
   const focusSelf = useCallback(
-    (focusDetails: FocusDetails = {}) => {
-      SpatialNavigation.setFocus(focusKey, focusDetails);
+    async (focusDetails: FocusDetails = {}) => {
+      await SpatialNavigation.setFocus(focusKey, focusDetails);
     },
     [focusKey]
   );
 
+  const promiseRef = useRef(Promise.resolve());
+
   useEffect(() => {
     const node = ref.current;
 
-    SpatialNavigation.addFocusable({
-      focusKey,
-      node,
-      parentFocusKey,
-      preferredChildFocusKey,
-      onEnterPress: onEnterPressHandler,
-      onEnterRelease: onEnterReleaseHandler,
-      onArrowPress: onArrowPressHandler,
-      onFocus: onFocusHandler,
-      onBlur: onBlurHandler,
-      onUpdateFocus: (isFocused = false) => setFocused(isFocused),
-      onUpdateHasFocusedChild: (isFocused = false) =>
-        setHasFocusedChild(isFocused),
-      saveLastFocusedChild,
-      trackChildren,
-      isFocusBoundary,
-      focusBoundaryDirections,
-      autoRestoreFocus,
-      forceFocus,
-      focusable
-    });
+    promiseRef.current = promiseRef.current.then(() =>
+      SpatialNavigation.addFocusable({
+        focusKey,
+        node,
+        parentFocusKey,
+        preferredChildFocusKey,
+        onEnterPress: onEnterPressHandler,
+        onEnterRelease: onEnterReleaseHandler,
+        onArrowPress: onArrowPressHandler,
+        onFocus: onFocusHandler,
+        onBlur: onBlurHandler,
+        onUpdateFocus: (isFocused = false) => setFocused(isFocused),
+        onUpdateHasFocusedChild: (isFocused = false) =>
+          setHasFocusedChild(isFocused),
+        saveLastFocusedChild,
+        trackChildren,
+        isFocusBoundary,
+        focusBoundaryDirections,
+        autoRestoreFocus,
+        forceFocus,
+        focusable
+      })
+    );
 
     return () => {
-      SpatialNavigation.removeFocusable({
-        focusKey
-      });
+      promiseRef.current = promiseRef.current.then(() =>
+        SpatialNavigation.removeFocusable({
+          focusKey
+        })
+      );
     };
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
