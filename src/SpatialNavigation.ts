@@ -53,6 +53,8 @@ const THROTTLE_OPTIONS = {
   trailing: false
 };
 
+export const DELAY_ENTER_HOLD = 1000;
+
 export interface FocusableComponentLayout extends MeasureLayout {
   node: HTMLElement;
 }
@@ -62,6 +64,7 @@ interface FocusableComponent {
   node: HTMLElement;
   parentFocusKey: string;
   onEnterPress: (details?: KeyPressDetails) => void;
+  onEnterHold: (details?: KeyPressDetails) => boolean;
   onEnterRelease: () => void;
   onArrowPress: (direction: string, details: KeyPressDetails) => boolean;
   onFocus: (layout: FocusableComponentLayout, details: FocusDetails) => void;
@@ -88,6 +91,7 @@ interface FocusableComponentUpdatePayload {
   isFocusBoundary: boolean;
   focusBoundaryDirections?: Direction[];
   onEnterPress: (details?: KeyPressDetails) => void;
+  onEnterHold: (details?: KeyPressDetails) => boolean;
   onEnterRelease: () => void;
   onArrowPress: (direction: string, details: KeyPressDetails) => boolean;
   onFocus: (layout: FocusableComponentLayout, details: FocusDetails) => void;
@@ -216,6 +220,10 @@ class SpatialNavigationService {
   >;
 
   private keyUpEventListener: (event: KeyboardEvent) => void;
+
+  private lastKeyDownTime: number;
+
+  private enterPressFocusKey: string | null;
 
   private keyMap: KeyMap;
 
@@ -546,6 +554,8 @@ class SpatialNavigationService {
 
     this.keyDownEventListener = null;
     this.keyUpEventListener = null;
+    this.lastKeyDownTime = 0;
+    this.enterPressFocusKey = null;
     this.keyMap = DEFAULT_KEY_MAP;
 
     this.onKeyEvent = this.onKeyEvent.bind(this);
@@ -685,7 +695,25 @@ class SpatialNavigationService {
           pressedKeys: this.pressedKeys
         };
 
+        const time = Date.now();
+
         if (eventType === KEY_ENTER && this.focusKey) {
+          if (this.lastKeyDownTime === 0) {
+            this.lastKeyDownTime = time;
+            this.enterPressFocusKey = this.focusKey;
+          } else if (time - this.lastKeyDownTime > DELAY_ENTER_HOLD) {
+            const preventReleaseAfterHold =
+              this.onEnterHold(keysDetails) === false;
+
+            if (preventReleaseAfterHold) {
+              this.log('keyDownEventListener', 'release handler prevented');
+
+              this.enterPressFocusKey = null;
+            }
+
+            return;
+          }
+
           this.onEnterPress(keysDetails);
 
           return;
@@ -725,8 +753,17 @@ class SpatialNavigationService {
         }
 
         if (eventType === KEY_ENTER && this.focusKey) {
-          this.onEnterRelease();
+          if (
+            this.enterPressFocusKey === this.focusKey &&
+            this.enterPressFocusKey !== null
+          ) {
+            this.onEnterRelease();
+          }
+
+          this.enterPressFocusKey = null;
         }
+
+        this.lastKeyDownTime = 0;
       };
 
       window.addEventListener('keyup', this.keyUpEventListener);
@@ -774,6 +811,28 @@ class SpatialNavigationService {
     if (component.onEnterPress) {
       component.onEnterPress(keysDetails);
     }
+  }
+
+  onEnterHold(keysDetails: KeyPressDetails) {
+    const component = this.focusableComponents[this.focusKey];
+
+    /* Guard against last-focused component being unmounted at time of onEnterHold (e.g due to UI fading out) */
+    if (!component) {
+      this.log('onEnterHold', 'noComponent');
+
+      return undefined;
+    }
+
+    /* Suppress onEnterHold if the last-focused item happens to lose its 'focused' status. */
+    if (!component.focusable) {
+      this.log('onEnterHold', 'componentNotFocusable');
+
+      return undefined;
+    }
+
+    return (
+      component && component.onEnterHold && component.onEnterHold(keysDetails)
+    );
   }
 
   onEnterRelease() {
@@ -1162,6 +1221,7 @@ class SpatialNavigationService {
     node,
     parentFocusKey,
     onEnterPress,
+    onEnterHold,
     onEnterRelease,
     onArrowPress,
     onFocus,
@@ -1182,6 +1242,7 @@ class SpatialNavigationService {
       node,
       parentFocusKey,
       onEnterPress,
+      onEnterHold,
       onEnterRelease,
       onArrowPress,
       onFocus,
@@ -1335,6 +1396,7 @@ class SpatialNavigationService {
     }
 
     this.focusKey = newFocusKey;
+    this.enterPressFocusKey = null;
 
     if (this.isFocusableComponent(this.focusKey)) {
       const newComponent = this.focusableComponents[this.focusKey];
@@ -1567,6 +1629,7 @@ class SpatialNavigationService {
       isFocusBoundary,
       focusBoundaryDirections,
       onEnterPress,
+      onEnterHold,
       onEnterRelease,
       onArrowPress,
       onFocus,
@@ -1585,6 +1648,7 @@ class SpatialNavigationService {
       component.isFocusBoundary = isFocusBoundary;
       component.focusBoundaryDirections = focusBoundaryDirections;
       component.onEnterPress = onEnterPress;
+      component.onEnterHold = onEnterHold;
       component.onEnterRelease = onEnterRelease;
       component.onArrowPress = onArrowPress;
       component.onFocus = onFocus;

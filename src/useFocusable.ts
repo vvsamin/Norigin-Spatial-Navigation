@@ -22,6 +22,11 @@ export type EnterPressHandler<P = object> = (
   details: KeyPressDetails
 ) => void;
 
+export type EnterHoldHandler<P = object> = (
+  props: P,
+  details: KeyPressDetails
+) => boolean;
+
 export type EnterReleaseHandler<P = object> = (props: P) => void;
 
 export type ArrowPressHandler<P = object> = (
@@ -53,6 +58,7 @@ export interface UseFocusableConfig<P = object> {
   focusKey?: string;
   preferredChildFocusKey?: string;
   onEnterPress?: EnterPressHandler<P>;
+  onEnterHold?: EnterHoldHandler<P>;
   onEnterRelease?: EnterReleaseHandler<P>;
   onArrowPress?: ArrowPressHandler<P>;
   onFocus?: FocusHandler<P>;
@@ -79,6 +85,7 @@ const useFocusableHook = <P>({
   focusKey: propFocusKey,
   preferredChildFocusKey,
   onEnterPress = noop,
+  onEnterHold = () => true,
   onEnterRelease = noop,
   onArrowPress = () => true,
   onFocus = noop,
@@ -90,6 +97,11 @@ const useFocusableHook = <P>({
       onEnterPress(extraProps, details);
     },
     [onEnterPress, extraProps]
+  );
+
+  const onEnterHoldHandler = useCallback(
+    (details: KeyPressDetails) => onEnterHold(extraProps, details),
+    [onEnterHold, extraProps]
   );
 
   const onEnterReleaseHandler = useCallback(() => {
@@ -150,6 +162,7 @@ const useFocusableHook = <P>({
         parentFocusKey,
         preferredChildFocusKey,
         onEnterPress: onEnterPressHandler,
+        onEnterHold: onEnterHoldHandler,
         onEnterRelease: onEnterReleaseHandler,
         onArrowPress: onArrowPressHandler,
         onFocus: onFocusHandler,
@@ -186,6 +199,7 @@ const useFocusableHook = <P>({
       isFocusBoundary,
       focusBoundaryDirections,
       onEnterPress: onEnterPressHandler,
+      onEnterHold: onEnterHoldHandler,
       onEnterRelease: onEnterReleaseHandler,
       onArrowPress: onArrowPressHandler,
       onFocus: onFocusHandler,
@@ -198,6 +212,7 @@ const useFocusableHook = <P>({
     isFocusBoundary,
     focusBoundaryDirections,
     onEnterPressHandler,
+    onEnterHoldHandler,
     onEnterReleaseHandler,
     onArrowPressHandler,
     onFocusHandler,
